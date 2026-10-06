@@ -26,6 +26,7 @@ jobs:
       OLLAMA_BASE_URL: http://localhost:11434
       # The runner is CPU-only, so CI uses the smallest model from the same family.
       LLM_MODEL: qwen2.5-coder:0.5b
+      OLLAMA_MODELS: /home/runner/ollama-models
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,9 +39,19 @@ jobs:
 
       - run: npm ci
 
+      # Runners start empty, so keep the downloaded model between runs.
+      - name: Cache Ollama model
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ env.LLM_MODEL }}
+
       - name: Install and start Ollama
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
+          # The installer starts a system service that stores models elsewhere;
+          # stop it and serve from the cached folder instead.
+          sudo systemctl stop ollama 2>/dev/null || true
           (ollama serve > /tmp/ollama.log 2>&1 &)
           for i in $(seq 1 30); do curl -sf http://localhost:11434/api/tags >/dev/null && break; sleep 2; done
           ollama pull "$LLM_MODEL"
