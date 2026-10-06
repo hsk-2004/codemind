@@ -50,7 +50,8 @@ export default function CreatePage() {
   )
 
   function onSubmit(data: FormInput) {
-    const id = crypto.randomUUID().replace(/-/g, '')
+    // crypto.randomUUID only exists on HTTPS or localhost; getRandomValues also works over plain http (e.g. a VM's IP).
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
     setJobId(id)
     createProject.mutate(
       { githubUrl: data.repoUrl.trim(), name: data.projectName.trim(), githubToken: data.githubToken?.trim() || undefined, jobId: id },

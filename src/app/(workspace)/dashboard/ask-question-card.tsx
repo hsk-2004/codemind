@@ -1,6 +1,6 @@
 'use client'
 import MDEditor from '@uiw/react-md-editor'
-import { Bot, Clock, Cloud, Columns2, Cpu, Database, FileCode2, Hash, Loader2, Save, ShieldAlert, ShieldCheck, ShieldOff, Sparkles, Zap } from 'lucide-react'
+import { Bot, Clock, Cloud, Columns2, Cpu, Database, FileCode2, Hash, Loader2, Save, ShieldAlert, ShieldCheck, ShieldOff, Sparkles, TrendingUp, Zap } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -22,11 +22,12 @@ const EXAMPLES = [
   'Which files handle the UI?',
 ]
 
-type AskMode = AnswerMode | 'compare'
+type AskMode = Exclude<AnswerMode, 'escalate'> | 'compare'
 
 const MODES: { value: AskMode; label: string; hint: string; icon: typeof ShieldCheck }[] = [
   { value: 'rag', label: 'With RAG', hint: 'Retrieves relevant code first, then answers from it.', icon: ShieldCheck },
   { value: 'direct', label: 'Without RAG', hint: 'Asks the model with no repository code, as a baseline.', icon: ShieldOff },
+  { value: 'auto', label: 'Auto-scale', hint: 'Answers on the small local model first, then offers to scale up to a larger cloud model. Nothing is sent to the cloud until you approve.', icon: TrendingUp },
   { value: 'compare', label: 'Compare both', hint: 'Runs both and shows the answers side by side.', icon: Columns2 },
 ]
 
@@ -36,6 +37,13 @@ interface Result {
   output: string
   filesReferences: FileReference[]
   meta: AnswerMeta | null
+}
+
+const TITLES: Record<AnswerMode, string> = {
+  rag: 'With RAG',
+  direct: 'Without RAG',
+  auto: 'Small local model',
+  escalate: 'Scaled up: larger model',
 }
 
 const pending = (mode: AnswerMode): Result => ({ mode, status: 'loading', output: '', filesReferences: [], meta: null })
@@ -61,6 +69,9 @@ function MetaBadges({ meta }: { meta: AnswerMeta }) {
       ) : (
         <Badge variant="outline" className="border-amber-500/40 text-amber-500"><ShieldAlert className="size-3" /> No relevant code found</Badge>
       )}
+      {meta.mode === 'escalate' && (
+        <Badge variant="outline" className="border-violet-500/40 text-violet-400"><TrendingUp className="size-3" /> Scaled up</Badge>
+      )}
       <Badge variant="secondary">
         {meta.location === 'cloud' ? <Cloud className="size-3 text-amber-500" /> : <Cpu className="size-3 text-emerald-500" />}
         {meta.model} · {meta.location === 'cloud' ? meta.providerLabel : 'local'}
@@ -81,13 +92,14 @@ function MetaBadges({ meta }: { meta: AnswerMeta }) {
   )
 }
 
-function AnswerPanel({ result, showTitle }: { result: Result; showTitle: boolean }) {
+function AnswerPanel({ result, showTitle, onEscalate }: { result: Result; showTitle: boolean; onEscalate?: () => void }) {
+  const suggestion = result.meta?.suggestion
   return (
     <section className="min-w-0 space-y-4">
       {showTitle && (
         <h3 className="flex items-center gap-2 border-b pb-2 text-sm font-semibold">
-          {result.mode === 'rag' ? <ShieldCheck className="size-4 text-emerald-500" /> : <ShieldOff className="size-4 text-muted-foreground" />}
-          {result.mode === 'rag' ? 'With RAG' : 'Without RAG'}
+          {result.mode === 'direct' ? <ShieldOff className="size-4 text-muted-foreground" /> : result.mode === 'escalate' ? <TrendingUp className="size-4 text-violet-400" /> : <ShieldCheck className="size-4 text-emerald-500" />}
+          {TITLES[result.mode]}
         </h3>
       )}
 
@@ -97,7 +109,11 @@ function AnswerPanel({ result, showTitle }: { result: Result; showTitle: boolean
             <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
             <div>
               <p className="font-medium">
-                {result.mode === 'rag' ? 'Retrieving relevant code and generating an answer…' : 'Generating an answer without repository code…'}
+                {result.mode === 'direct'
+                  ? 'Generating an answer without repository code…'
+                  : result.mode === 'escalate'
+                    ? 'Asking the larger model with the same retrieved code…'
+                    : 'Retrieving relevant code and generating an answer…'}
               </p>
               <p className="text-sm text-muted-foreground">Elapsed: <ElapsedTimer /></p>
             </div>
@@ -115,6 +131,23 @@ function AnswerPanel({ result, showTitle }: { result: Result; showTitle: boolean
           <div data-color-mode="dark">
             <MDEditor.Markdown source={result.output} style={{ background: 'transparent', fontSize: 14 }} />
           </div>
+          {onEscalate && suggestion && (
+            <div className={cn('rounded-lg border p-4 text-sm', suggestion.reason ? 'border-amber-500/40 bg-amber-500/5' : 'bg-muted/30')}>
+              <p className="font-medium">
+                {suggestion.reason ? 'This answer may be weak. Scaling up is recommended.' : 'Not satisfied with this answer?'}
+              </p>
+              {suggestion.reason && <p className="mt-1 text-muted-foreground">Reason: {suggestion.reason}.</p>}
+              <p className="mt-1 text-muted-foreground">
+                Re-ask with the larger <span className="font-medium text-foreground">{suggestion.to.model}</span> ({suggestion.to.providerLabel}, cloud), using the same retrieved code. The code excerpts will be sent to {suggestion.to.providerLabel}.
+              </p>
+              <Button size="sm" className="mt-3" variant={suggestion.reason ? 'default' : 'outline'} onClick={onEscalate}>
+                <TrendingUp /> Scale up to {suggestion.to.model}
+              </Button>
+            </div>
+          )}
+          {result.meta?.keptLocalReason && (
+            <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">{result.meta.keptLocalReason}</p>
+          )}
           {result.filesReferences.length > 0 && (
             <div className="border-t pt-4">
               <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold">
@@ -174,8 +207,19 @@ const AskQuestionCard = () => {
     }
   }
 
+  const escalate = async () => {
+    if (!project?.id || loading) return
+    saveAnswer.reset()
+    setResults((prev) => [...prev.filter((r) => r.mode !== 'escalate'), pending('escalate')])
+    await run(asked, 'escalate', project.id)
+  }
+  const escalated = results.some((r) => r.mode === 'escalate')
+
   // Save the grounded answer when there is one, otherwise the only answer shown.
-  const savable = results.find((r) => r.mode === 'rag' && r.status === 'done') ?? results.find((r) => r.status === 'done')
+  const savable =
+    results.find((r) => r.mode === 'escalate' && r.status === 'done') ??
+    results.find((r) => (r.mode === 'rag' || r.mode === 'auto') && r.status === 'done') ??
+    results.find((r) => r.status === 'done')
 
   const handleSaveAnswer = () => {
     if (!project?.id || !savable) return
@@ -200,7 +244,11 @@ const AskQuestionCard = () => {
           <DialogHeader className="shrink-0">
             <DialogTitle className="pr-8 text-left text-lg">{asked}</DialogTitle>
             <DialogDescription className="text-left">
-              {isCompare
+              {escalated
+                ? 'The same question and retrieved code, answered by the small local model and by a larger cloud model.'
+                : results[0]?.mode === 'auto'
+                  ? 'Answered by the small local model first. You can scale up to a larger model below.'
+                  : isCompare
                 ? 'The same question and model, with and without retrieved repository code.'
                 : results[0]?.mode === 'direct'
                   ? 'Answered without any repository code (RAG off).'
@@ -210,13 +258,20 @@ const AskQuestionCard = () => {
 
           <div className="flex-1 overflow-y-auto pr-1">
             <div className={cn('grid gap-6', isCompare && 'lg:grid-cols-2')}>
-              {results.map((result) => <AnswerPanel key={result.mode} result={result} showTitle={isCompare} />)}
+              {results.map((result) => (
+                <AnswerPanel
+                  key={result.mode}
+                  result={result}
+                  showTitle={isCompare || result.mode === 'auto'}
+                  onEscalate={result.mode === 'auto' && !escalated && !loading ? () => void escalate() : undefined}
+                />
+              ))}
             </div>
 
             {!loading && savable && (
               <div className="mt-5 flex justify-end">
                 <Button size="sm" variant="outline" disabled={saveAnswer.isPending || saveAnswer.isSuccess} onClick={handleSaveAnswer}>
-                  <Save /> {saveAnswer.isSuccess ? 'Saved' : saveAnswer.isPending ? 'Saving…' : isCompare ? 'Save RAG answer' : 'Save answer'}
+                  <Save /> {saveAnswer.isSuccess ? 'Saved' : saveAnswer.isPending ? 'Saving…' : escalated ? 'Save scaled-up answer' : isCompare ? 'Save RAG answer' : 'Save answer'}
                 </Button>
               </div>
             )}
@@ -247,7 +302,7 @@ const AskQuestionCard = () => {
             className="space-y-3"
           >
             <div>
-              <div className="grid grid-cols-3 gap-1 rounded-lg border p-1" role="radiogroup" aria-label="Answer mode">
+              <div className="grid grid-cols-2 gap-1 rounded-lg border p-1 sm:grid-cols-4" role="radiogroup" aria-label="Answer mode">
                 {MODES.map((m) => (
                   <button
                     key={m.value}

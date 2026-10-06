@@ -1,4 +1,4 @@
-export type LlmOperation = "rag_answer" | "direct_answer" | "file_summary" | "commit_summary" | "breaking_change" | "embedding";
+export type LlmOperation = "rag_answer" | "rag_escalation" | "direct_answer" | "file_summary" | "commit_summary" | "breaking_change" | "embedding";
 
 export interface LlmCallEvent {
   projectId?: string;
