@@ -1,0 +1,47 @@
+# Run on the laptop that has Ollama + the GPU, to let a hosted CodeMind
+# (e.g. on Vercel) use it securely from anywhere.
+#
+#   1. Copy remote-ollama/.env.example to remote-ollama/.env and set a long random OLLAMA_API_KEY
+#   2. docker compose -f remote-ollama/docker-compose.yml up -d
+#   3. docker logs codemind_tunnel   -> copy the https://<name>.trycloudflare.com URL
+#   4. In Vercel set OLLAMA_BASE_URL=<that URL> and OLLAMA_API_KEY=<same key>
+#
+# Quick tunnels get a new URL on every restart. For a permanent URL, create a
+# named tunnel in Cloudflare Zero Trust (public hostname -> http://gateway:8080),
+# put its token in CLOUDFLARE_TUNNEL_TOKEN and run with:  --profile named up -d gateway tunnel-named
+
+services:
+  gateway:
+    image: caddy:2-alpine
+    container_name: codemind_ollama_gateway
+    restart: unless-stopped
+    environment:
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:?Set OLLAMA_API_KEY in remote-ollama/.env}"
+      OLLAMA_UPSTREAM: "${OLLAMA_UPSTREAM:-host.docker.internal:11434}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # Free quick tunnel (random URL each start).
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: codemind_tunnel
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    command: ["tunnel", "--no-autoupdate", "--url", "http://gateway:8080"]
+
+  # Permanent URL via a Cloudflare named tunnel.
+  tunnel-named:
+    image: cloudflare/cloudflared:latest
+    container_name: codemind_tunnel_named
+    profiles: ["named"]
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN:-}"

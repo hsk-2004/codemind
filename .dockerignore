@@ -1,0 +1,15 @@
+node_modules
+.next
+.next-local
+.git
+.env
+.env.*
+!.env.example
+npm-debug.log*
+*.md
+.vscode
+.DS_Store
+tests
+scripts
+.github
+coverage

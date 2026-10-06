@@ -1,0 +1,31 @@
+# Token-protected gateway in front of the laptop's Ollama.
+# Ollama has no authentication of its own, so only requests carrying
+# "Authorization: Bearer <OLLAMA_API_KEY>" are forwarded.
+:8080 {
+	@authorized header Authorization "Bearer {$OLLAMA_API_KEY}"
+
+	handle @authorized {
+		reverse_proxy {$OLLAMA_UPSTREAM} {
+			# Ollama only trusts requests that look local.
+			header_up Host localhost:11434
+			header_up -Authorization
+			# Long generations: don't cut the stream off.
+			transport http {
+				read_timeout 10m
+			}
+		}
+	}
+
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	handle {
+		respond "Unauthorized" 401
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

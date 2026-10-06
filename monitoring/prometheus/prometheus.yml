@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Port 3000 on the host is CodeMind in both modes: the Docker app publishes it,
+  # and `npm run dev` listens on it. One target avoids double-counting.
+  - job_name: codemind
+    metrics_path: /api/metrics
+    static_configs:
+      - targets: ["host.docker.internal:3000"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,175 @@
+# CodeMind — full stack
+#
+#   docker compose up --build                      app + PostgreSQL + Qdrant (Ollama on the host)
+#   docker compose --profile monitoring up -d      add Prometheus (:9090) + Grafana (:3030)
+#   docker compose --profile ollama up --build     also run Ollama in a container (CPU)
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up --build
+#                                                  Ollama container with NVIDIA GPU
+#
+# When Ollama runs in a container, set DOCKER_OLLAMA_BASE_URL=http://ollama:11434 in .env.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: codemind_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: codemind_dev_password
+      POSTGRES_DB: codemind
+    ports:
+      - "5433:5432"
+    volumes:
+      - codemind_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d codemind"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant
+    container_name: codemind_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - codemind_qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies the Prisma schema, then exits.
+  migrate:
+    build:
+      context: .
+      target: migrate
+    container_name: codemind_migrate
+    environment:
+      DATABASE_URL: "postgresql://postgres:codemind_dev_password@db:5432/codemind"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+    image: codemind-app:latest
+    container_name: codemind_app
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://postgres:codemind_dev_password@db:5432/codemind"
+      # Separate from OLLAMA_BASE_URL in .env, which points at localhost for `npm run dev`.
+      OLLAMA_BASE_URL: "${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
+      LLM_PROVIDER: "ollama"
+      LLM_MODEL: "${LLM_MODEL:-qwen2.5-coder:3b-instruct}"
+      LLM_NUM_CTX: "${LLM_NUM_CTX:-3072}"
+      EMBEDDING_PROVIDER: "ollama"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-nomic-embed-text}"
+      QDRANT_URL: "http://qdrant:6333"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # 127.0.0.1, not localhost: on Alpine "localhost" resolves to ::1 but Next.js listens on IPv4.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Optional: Ollama in a container (enable with --profile ollama).
+  ollama:
+    image: ollama/ollama
+    container_name: codemind_ollama
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - codemind_ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Optional: downloads the two models into the Ollama container, then exits.
+  ollama-pull:
+    image: ollama/ollama
+    container_name: codemind_ollama_pull
+    profiles: ["ollama"]
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${LLM_MODEL:-qwen2.5-coder:3b-instruct} && ollama pull ${EMBEDDING_MODEL:-nomic-embed-text}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  # Optional monitoring stack (enable with --profile monitoring).
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: codemind_prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - codemind_prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: codemind_grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - db
+    ports:
+      - "3030:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-codemind}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/codemind.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - codemind_grafana_data:/var/lib/grafana
+
+# Explicit names so data survives regardless of the Compose project name.
+volumes:
+  codemind_db_data:
+    name: codemind_db_data
+  codemind_qdrant_data:
+    name: codemind_qdrant_data
+  codemind_ollama_models:
+    name: codemind_ollama_models
+  codemind_prometheus_data:
+    name: codemind_prometheus_data
+  codemind_grafana_data:
+    name: codemind_grafana_data
