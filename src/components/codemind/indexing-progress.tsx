@@ -1,5 +1,5 @@
 'use client'
-import { AlertTriangle, CheckCircle2, Circle, Database, FileCode2, GitCommitHorizontal, Github, ListFilter, Loader2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Circle, Database, FileCode2, GitCommitHorizontal, Github, ListFilter, Loader2, XCircle, Puzzle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Progress } from '@/components/ui/progress'
 import type { IndexEvent } from '@/lib/indexing-progress'
@@ -28,10 +28,11 @@ const STAGES = [
   { key: 'loading', label: 'Load repository', icon: Github },
   { key: 'selecting', label: 'Select files', icon: ListFilter },
   { key: 'indexing', label: 'Summarise & embed', icon: FileCode2 },
+  { key: 'chunking', label: 'Function-level chunks', icon: Puzzle },
   { key: 'commits', label: 'Analyse commits', icon: GitCommitHorizontal },
 ] as const
 
-const ORDER = ['queued', 'loading', 'selecting', 'indexing', 'commits', 'done']
+const ORDER = ['queued', 'loading', 'selecting', 'indexing', 'chunking', 'commits', 'done']
 
 const fmt = (ms: number) => (ms >= 60_000 ? `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s` : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`)
 
@@ -88,7 +89,7 @@ export function IndexingProgress({ job, compact = false }: { job: IndexingJobVie
 
       {job.error && <p className="rounded-md border border-red-500/40 bg-red-500/5 p-3 text-sm text-red-400">{job.error}</p>}
 
-      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {STAGES.map((stage) => {
           const index = ORDER.indexOf(stage.key)
           const done = currentIndex > index || job.status === 'completed'

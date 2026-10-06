@@ -1,5 +1,8 @@
 import { GithubRepoLoader } from '@langchain/community/document_loaders/web/github';
 import { Document } from '@langchain/core/documents';
+import { randomUUID } from 'node:crypto';
+import { getLangChainEmbeddings } from '@/services/embedding';
+import { chunkEmbeddingText, chunkFile, type CodeChunk } from '@/services/rag/chunking';
 import { summariseCode, generateEmbedding } from './ai';
 import { db } from '@/server/db';
 import { LOADER_IGNORE_PATTERNS, isIndexableFile } from './file-selection';
@@ -146,13 +149,64 @@ export const indexGithubRepo = async (
   reporter.set({ currentItem: null });
   reporter.log(`Indexed ${successful}/${filteredDocs.length} files`, successful === filteredDocs.length ? 'success' : 'warn');
 
+  // Function-level chunks cover far more files than the summaries: they need no LLM call.
+  const chunkDocs = filterAndPrioritizeDocs(docs, MAX_CHUNK_FILES);
+  reporter.stage('chunking', `Splitting ${chunkDocs.length} files into function-level chunks`);
+  const chunks = await indexChunks(chunkDocs, projectId, reporter);
+  reporter.set({ currentItem: null });
+
   return {
     totalFiles: docs.length,
     processedFiles: filteredDocs.length,
     successfulEmbeddings: successful,
     failedEmbeddings: filteredDocs.length - successful,
+    chunkedFiles: chunks.files,
+    chunks: chunks.chunks,
   };
 };
+
+/** Files split into function-level chunks: every indexable file up to this many, summarised or not. */
+export const MAX_CHUNK_FILES = 300;
+const CHUNK_EMBED_BATCH = 16;
+
+async function storeChunks(projectId: string, fileName: string, chunks: CodeChunk[], vectors: number[][]) {
+  for (const [i, chunk] of chunks.entries()) {
+    const vector = `[${vectors[i]!.join(',')}]`;
+    await db.$executeRaw`
+      INSERT INTO "CodeChunk" ("id", "projectId", "fileName", "symbol", "startLine", "endLine", "content", "embedding")
+      VALUES (${randomUUID()}, ${projectId}, ${fileName}, ${chunk.symbol}, ${chunk.startLine}, ${chunk.endLine}, ${chunk.content}, ${vector}::vector)`;
+  }
+}
+
+/** Splits each file at function and class boundaries, embeds the chunks and stores them. Never throws. */
+async function indexChunks(docs: Document[], projectId: string, reporter: ProgressReporter) {
+  const embeddings = getLangChainEmbeddings(projectId);
+  let files = 0;
+  let total = 0;
+  const started = Date.now();
+  for (const doc of docs) {
+    const fileName = doc.metadata.source as string;
+    reporter.set({ currentItem: fileName });
+    try {
+      const chunks = await chunkFile(fileName, doc.pageContent);
+      if (chunks.length === 0) continue;
+      const vectors: number[][] = [];
+      for (let i = 0; i < chunks.length; i += CHUNK_EMBED_BATCH) {
+        const batch = chunks.slice(i, i + CHUNK_EMBED_BATCH);
+        vectors.push(...(await embeddings.embedDocuments(batch.map((c) => chunkEmbeddingText(fileName, c)))));
+      }
+      await storeChunks(projectId, fileName, chunks, vectors);
+      files++;
+      total += chunks.length;
+      const symbols = chunks.map((c) => c.symbol).filter(Boolean).slice(0, 4).join(', ');
+      reporter.log(`${fileName} — ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}${symbols ? ` (${symbols})` : ''}`, 'success');
+    } catch (error) {
+      reporter.log(`${fileName} — chunking failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    }
+  }
+  reporter.log(`Function-level index: ${total} chunks from ${files} files in ${formatDuration(Date.now() - started)}`, files === docs.length ? 'success' : 'warn');
+  return { files, chunks: total };
+}
 
 // Utility function to preview which files would be processed
 export const previewFilesToProcess = async (githubUrl: string, githubToken?: string, maxFiles: number = 30) => {

@@ -1,4 +1,4 @@
-export type IndexStage = "queued" | "loading" | "selecting" | "indexing" | "commits" | "done";
+export type IndexStage = "queued" | "loading" | "selecting" | "indexing" | "chunking" | "commits" | "done";
 
 export interface IndexCounters {
   filesInRepo: number;

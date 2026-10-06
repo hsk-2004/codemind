@@ -42,6 +42,7 @@ model Project{
   UserToProjects  UserToProject[]
   commits         Commit[]
   sourceCodeEmbeddings SourceCodeEmbedding[] 
+  codeChunks      CodeChunk[]
   savedQuestions Question[]
 
 }
@@ -173,6 +174,23 @@ model LlmCall {
 
   @@index([createdAt])
   @@index([projectId, createdAt])
+}
+
+// Function-level chunks: every indexable file split at function and class
+// boundaries, each with its own embedding of the code. Used for retrieval in
+// large repositories, where only the most important files get an LLM summary.
+model CodeChunk {
+  id        String @id
+  projectId String
+  fileName  String
+  symbol    String?
+  startLine Int
+  endLine   Int
+  content   String
+  embedding Unsupported("vector(768)")?
+  project   Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
 }
 
 model SourceCodeEmbedding{

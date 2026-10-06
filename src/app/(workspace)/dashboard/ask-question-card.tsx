@@ -76,7 +76,10 @@ function MetaBadges({ meta }: { meta: AnswerMeta }) {
         {meta.location === 'cloud' ? <Cloud className="size-3 text-amber-500" /> : <Cpu className="size-3 text-emerald-500" />}
         {meta.model} · {meta.location === 'cloud' ? meta.providerLabel : 'local'}
       </Badge>
-      {meta.mode === 'rag' && <Badge variant="secondary"><Database className="size-3" /> Retrieval {formatMs(meta.retrievalMs)}</Badge>}
+      {meta.mode !== 'direct' && meta.retrievalMs > 0 && <Badge variant="secondary"><Database className="size-3" /> Retrieval {formatMs(meta.retrievalMs)}</Badge>}
+      {meta.retrievalLevel === 'function' && (
+        <Badge variant="outline" className="border-sky-500/40 text-sky-400" title="Matched individual functions and classes, not whole files">Function-level</Badge>
+      )}
       {meta.generationMs > 0 && <Badge variant="secondary"><Sparkles className="size-3" /> Generation {formatMs(meta.generationMs)}</Badge>}
       <Badge variant="secondary"><Clock className="size-3" /> Total {formatMs(meta.totalMs)}</Badge>
       {meta.promptTokens != null && (

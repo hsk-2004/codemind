@@ -10,7 +10,7 @@ import type { CompletionMetrics } from '@/services/llm/provider'
 import { NO_CONTEXT_ANSWER, contextLimitsFor, createDirectChain, createRagChain, type SourceDocument } from '@/services/rag/chain'
 import { ESCALATION_REASONS, escalationReason, modelTiers } from '@/services/rag/escalation'
 import { RAG_PROMPT_VERSION } from '@/services/rag/prompt'
-import { createPgVectorRetriever } from '@/services/rag/retriever'
+import { createProjectRetriever } from '@/services/rag/retriever'
 import { emitLlmCall, type LlmOperation } from '@/services/telemetry'
 
 /**
@@ -42,6 +42,8 @@ export interface AnswerMeta extends ModelRef {
     generationMs: number
     totalMs: number
     sourcesUsed: number
+    /** 'function': matched function-level chunks; 'file': matched whole-file summaries. */
+    retrievalLevel?: 'function' | 'file'
     grounded: boolean
     /** Only for 'auto': a larger model the user can scale up to. */
     suggestion?: EscalationSuggestion
@@ -133,9 +135,13 @@ export async function askQuestion(question: string, projectId: string, mode: Ans
 
     let sources: SourceDocument[] = []
     let retrievalMs = 0
+    let retrievalLevel: 'function' | 'file' | undefined
     if (mode !== 'direct') {
-        const retrieve = createPgVectorRetriever(db, getLangChainEmbeddings(projectId), projectId)
-        sources = await retrieve(trimmed)
+        // Chunks retrieved per question, sized to each model's context budget.
+        const chunkCount = active.provider === 'ollama' ? 6 : active.provider === 'groq' ? 8 : 16
+        const retriever = await createProjectRetriever(db, getLangChainEmbeddings(projectId), projectId, chunkCount)
+        retrievalLevel = retriever.level
+        sources = await retriever.retrieve(trimmed)
         retrievalMs = Date.now() - started
     }
 
@@ -191,6 +197,7 @@ export async function askQuestion(question: string, projectId: string, mode: Ans
         generationMs: result ? totalMs - retrievalMs : 0,
         totalMs,
         sourcesUsed: sources.length,
+        retrievalLevel,
         grounded: sources.length > 0,
         suggestion,
         keptLocalReason,
