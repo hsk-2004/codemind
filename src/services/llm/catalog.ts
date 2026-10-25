@@ -8,6 +8,8 @@ export interface CatalogModel {
   model: string;
   /** Extra detail shown in the picker, e.g. size on disk. */
   note?: string;
+  /** Size of a local model on disk, when known. */
+  sizeBytes?: number;
 }
 
 export interface ProviderCatalog {
@@ -49,7 +51,7 @@ async function listOllama(): Promise<ProviderCatalog> {
     const data = (await res.json()) as { models: { name: string; size: number }[] };
     const models = data.models
       .filter((m) => isOllamaChatModel(m.name))
-      .map((m) => ({ provider: "ollama" as const, model: m.name.replace(/:latest$/, ""), note: formatSize(m.size) }))
+      .map((m) => ({ provider: "ollama" as const, model: m.name.replace(/:latest$/, ""), note: formatSize(m.size), sizeBytes: m.size }))
       .sort((a, b) => a.model.localeCompare(b.model));
     return { provider: "ollama", configured: true, models };
   } catch (error) {

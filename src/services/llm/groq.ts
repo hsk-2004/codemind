@@ -1,18 +1,42 @@
+import { readSseData } from "@/lib/stream-lines";
 import { cloudConfig } from "./config";
-import { BaseProvider, type CompletionMetrics, type GenerateOptions } from "./provider";
+import { BaseProvider, type CompletionMetrics, type GenerateOptions, type StreamChunk } from "./provider";
 import { fetchWithRetry, providerError, type RetryOptions } from "./retry";
 
 export const GROQ_API_BASE = "https://api.groq.com/openai/v1";
 
+interface GroqUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_time?: number;
+  completion_time?: number;
+  total_time?: number;
+  queue_time?: number;
+}
+
 interface GroqResponse {
   choices?: { message?: { content?: string | null }; finish_reason?: string }[];
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    prompt_time?: number;
-    completion_time?: number;
-    total_time?: number;
-    queue_time?: number;
+  usage?: GroqUsage;
+}
+
+interface GroqStreamChunk {
+  choices?: { delta?: { content?: string | null } }[];
+  usage?: GroqUsage;
+  x_groq?: { usage?: GroqUsage };
+}
+
+function usageToMetrics(usage: GroqUsage): CompletionMetrics {
+  const tokensPerSecond =
+    usage.completion_tokens && usage.completion_time
+      ? Math.round((usage.completion_tokens / usage.completion_time) * 10) / 10
+      : undefined;
+  return {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    promptEvalMs: secondsToMs(usage.prompt_time),
+    evalMs: secondsToMs(usage.completion_time),
+    totalDurationMs: secondsToMs(usage.total_time),
+    tokensPerSecond,
   };
 }
 
@@ -62,22 +86,40 @@ export class GroqProvider extends BaseProvider {
       throw new Error(`Groq returned an empty answer (${data.choices?.[0]?.finish_reason ?? "no content"})`);
     }
 
-    const usage = data.usage ?? {};
-    const tokensPerSecond =
-      usage.completion_tokens && usage.completion_time
-        ? Math.round((usage.completion_tokens / usage.completion_time) * 10) / 10
-        : undefined;
+    return { text, metrics: usageToMetrics(data.usage ?? {}) };
+  }
 
-    return {
-      text,
-      metrics: {
-        promptTokens: usage.prompt_tokens,
-        completionTokens: usage.completion_tokens,
-        promptEvalMs: secondsToMs(usage.prompt_time),
-        evalMs: secondsToMs(usage.completion_time),
-        totalDurationMs: secondsToMs(usage.total_time),
-        tokensPerSecond,
+  protected async *streamRequest(prompt: string, options: GenerateOptions): AsyncGenerator<StreamChunk> {
+    if (!this.apiKey) throw new Error("GROQ_API_KEY is not set");
+
+    const res = await fetchWithRetry(
+      `${GROQ_API_BASE}/chat/completions`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [
+            ...(options.system ? [{ role: "system", content: options.system }] : []),
+            { role: "user", content: prompt },
+          ],
+          temperature: options.temperature ?? 0.2,
+          max_tokens: (options.maxTokens ?? 512) + REASONING_HEADROOM_TOKENS,
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
       },
-    };
+      { ...this.retry, signal: options.signal },
+    );
+    if (!res.ok || !res.body) throw await providerError("Groq", res);
+
+    let usage: GroqUsage | undefined;
+    for await (const data of readSseData(res.body)) {
+      const chunk = JSON.parse(data) as GroqStreamChunk;
+      const text = chunk.choices?.[0]?.delta?.content;
+      if (text) yield { text };
+      usage = chunk.usage ?? chunk.x_groq?.usage ?? usage;
+    }
+    yield { metrics: usageToMetrics(usage ?? {}) };
   }
 }

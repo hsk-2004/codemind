@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK_SIZE, chunkEmbeddingText, chunkFile, findSymbol, languageFor } from "@/services/rag/chunking";
+import { CHUNK_SIZE, chunkEmbeddingText, chunkFile, findSymbol, languageFor, listSymbols } from "@/services/rag/chunking";
 import { groupChunksByFile, type ChunkRow } from "@/services/rag/retriever";
 
 const fn = (name: string, body: number) =>
@@ -61,5 +61,43 @@ describe("groupChunksByFile", () => {
     expect(docs[0]!.metadata.score).toBe(0.7);
     expect(docs[0]!.pageContent.indexOf("code@10")).toBeLessThan(docs[0]!.pageContent.indexOf("code@50"));
     expect(docs[0]!.metadata.summary).toBe("Function-level match: early (lines 10–19), late (lines 50–59)");
+  });
+});
+
+describe("listSymbols", () => {
+  const code = [
+    "// this function does nothing special",
+    "export async function loadItems() {}",
+    "export default class Store {",
+    "  private async save(item) {}",
+    "  static create() {}",
+    "}",
+    "export const render = (items: string[]): void => {};",
+    "const notAFunction = 42;",
+    "def helper(x):",
+    "func (s *Server) Start() {}",
+  ].join("\n");
+
+  it("finds real declarations with their line numbers", () => {
+    expect(listSymbols(code).map((s) => `${s.kind}:${s.name}@${s.line}`)).toEqual([
+      "function:loadItems@2",
+      "class:Store@3",
+      "method:save@4",
+      "method:create@5",
+      "function:render@7",
+      "function:helper@9",
+      "function:Start@10",
+    ]);
+  });
+
+  it("ignores the word function in comments and plain constants", () => {
+    const names = listSymbols(code).map((s) => s.name);
+    expect(names).not.toContain("does");
+    expect(names).not.toContain("notAFunction");
+  });
+
+  it("caps the list for huge files and handles empty input", () => {
+    expect(listSymbols("function a(){}\n".repeat(500), 10)).toHaveLength(10);
+    expect(listSymbols("")).toEqual([]);
   });
 });

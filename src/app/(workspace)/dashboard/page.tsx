@@ -10,6 +10,7 @@ import AskQuestionCard from './ask-question-card'
 import BreakingChangesAlert from './breaking-changes-alert'
 import BreakingChangesMonitorSimple from './breaking-changes-monitor-simple'
 import CommitLog from './commit-log'
+import { ExportReportButton } from './export-report-button'
 import { IndexingReportCard } from './indexing-report-card'
 import { OverviewStats } from './overview-stats'
 import { RepoInsightsCard } from './repo-insights-card'
@@ -51,6 +52,7 @@ export default function DashboardPage() {
               </Link>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <ExportReportButton projectId={project.id} />
               <ArchiveButton />
               <FetchCommitsButton projectId={project.id} />
             </div>

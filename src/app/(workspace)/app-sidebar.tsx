@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Activity, BarChart3, Bot, Brain, FileCode2, LayoutDashboard, Plus, Search } from 'lucide-react'
+import { Activity, BarChart3, Bot, Brain, Columns3, FileCode2, FlaskConical, LayoutDashboard, Plus, Search } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +24,9 @@ import { api } from '@/trpc/react'
 const navItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Ask AI', url: '/qa', icon: Bot },
+  { title: 'Compare Models', url: '/compare', icon: Columns3 },
   { title: 'Semantic Search', url: '/search', icon: Search },
+  { title: 'Retrieval Lab', url: '/evaluation', icon: FlaskConical },
   { title: 'Repository Files', url: '/files', icon: FileCode2 },
   { title: 'AI Metrics', url: '/metrics', icon: BarChart3 },
   { title: 'System Status', url: '/system', icon: Activity },

@@ -98,3 +98,41 @@ export function chunkEmbeddingText(path: string, chunk: CodeChunk): string {
   const where = chunk.symbol ? `${path} · ${chunk.symbol}` : path;
   return `File: ${where} (lines ${chunk.startLine}-${chunk.endLine})\n${chunk.content}`;
 }
+
+export interface CodeSymbol {
+  name: string;
+  kind: "function" | "class" | "method";
+  /** 1-based line of the declaration. */
+  line: number;
+}
+
+// Anchored at the start of a line, so the word "function" inside a comment or string is not a declaration.
+const DECLARATIONS: { kind: CodeSymbol["kind"]; pattern: RegExp }[] = [
+  { kind: "class", pattern: /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/ },
+  { kind: "function", pattern: /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/ },
+  {
+    kind: "function",
+    pattern: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=>]+)?=>/,
+  },
+  { kind: "function", pattern: /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)/ },
+  { kind: "function", pattern: /^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)/ },
+  { kind: "function", pattern: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)/ },
+  { kind: "method", pattern: /^\s+(?:(?:public|private|protected|static|async|override|readonly)\s+)+([A-Za-z_$][\w$]*)\s*\(/ },
+];
+
+/** Every function, class and method declared in a file, in order, with its line number. */
+export function listSymbols(code: string, max = 200): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  const lines = code.split("\n");
+  for (let i = 0; i < lines.length && symbols.length < max; i++) {
+    const line = lines[i]!;
+    for (const { kind, pattern } of DECLARATIONS) {
+      const name = pattern.exec(line)?.[1];
+      if (name) {
+        symbols.push({ name, kind, line: i + 1 });
+        break;
+      }
+    }
+  }
+  return symbols;
+}

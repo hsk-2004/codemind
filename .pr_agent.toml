@@ -1,0 +1,17 @@
+# Qodo Merge / PR-Agent (the open-source tool from the makers of CodiumAI).
+# Used by .github/workflows/qodo-pr-agent.yml. Docs: https://qodo-merge-docs.qodo.ai
+[config]
+# Cloud model through a Google AI Studio key. Change the model to match your key.
+model = "gemini/gemini-flash-latest"
+fallback_models = ["gemini/gemini-flash-lite-latest"]
+
+[pr_reviewer]
+require_tests_label = true
+require_security_review = true
+num_code_suggestions = 4
+
+[pr_code_suggestions]
+num_code_suggestions = 4
+
+[pr_description]
+generate_ai_title = false

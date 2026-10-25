@@ -3,7 +3,7 @@ import { z } from "zod";
 import { saveActiveModel } from "@/server/model-settings";
 import { PROVIDER_INFO, getActiveModel, isProviderConfigured } from "@/services/llm";
 import { listAvailableModels } from "@/services/llm/catalog";
-import { embeddingConfig } from "@/services/llm/config";
+import { cloudConfig, embeddingConfig, llmConfig } from "@/services/llm/config";
 import { appProcedure, createTRPCRouter } from "../trpc";
 
 export const modelsRouter = createTRPCRouter({
@@ -14,6 +14,8 @@ export const modelsRouter = createTRPCRouter({
     return {
       active: { ...active, ...PROVIDER_INFO[active.provider] },
       embeddingModel: embeddingConfig.model,
+      /** The model each provider starts with, used to pre-select models in the comparison. */
+      defaults: { ollama: llmConfig.model, gemini: cloudConfig.geminiDefaultModel, groq: cloudConfig.groqDefaultModel },
       providers: catalog.map((entry) => ({ ...entry, ...PROVIDER_INFO[entry.provider] })),
     };
   }),

@@ -1,0 +1,21 @@
+# Sweep.dev configuration (https://docs.sweep.dev). Sweep reads this file after the
+# Sweep GitHub App is installed on the repository. Open an issue whose title starts
+# with "Sweep:" (see .github/ISSUE_TEMPLATE/sweep-task.yml) and Sweep drafts a pull request.
+branch: main
+gha_enabled: True
+draft: True
+description: >-
+  CodeMind is a Next.js 15 + tRPC + Prisma app (TypeScript) that indexes a GitHub repository
+  and answers questions about it with RAG. Retrieval and prompts live in src/services/rag,
+  model providers in src/services/llm, GitHub integration in src/lib, and unit tests in
+  tests/unit (Vitest). Keep changes small, follow the existing code style, and add or update a
+  unit test for every behaviour change.
+blocked_dirs:
+  - node_modules
+  - .next
+  - prisma/migrations
+  - monitoring
+rules:
+  - "Every new function in src/services or src/lib has a unit test in tests/unit."
+  - "Never commit secrets; configuration goes through src/env.js and .env.example."
+  - "Run npm run lint, npm run typecheck and npm test before finishing."

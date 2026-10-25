@@ -23,6 +23,8 @@ export interface GenerateOptions {
   /** Telemetry labels for the Metrics dashboard; calls without an operation are not recorded. */
   operation?: LlmOperation;
   projectId?: string;
+  /** Stops a streaming generation, for example when the user presses Stop. */
+  signal?: AbortSignal;
 }
 
 /** Token counts and timings for one completion, as far as the provider reports them. */
@@ -37,11 +39,16 @@ export interface Completion {
   latencyMs: number;
 }
 
+/** One piece of a streamed answer: some text, or, last of all, the metrics of the whole generation. */
+export type StreamChunk = { text: string; metrics?: undefined } | { text?: undefined; metrics: CompletionMetrics };
+
 export interface LLMProvider {
   readonly id: ProviderId;
   readonly model: string;
   /** Full completion with metrics. Emits a telemetry event when `options.operation` is set. */
   complete(prompt: string, options?: GenerateOptions): Promise<Completion>;
+  /** The same completion as it is written: text pieces first, then one chunk with the metrics. */
+  stream(prompt: string, options?: GenerateOptions): AsyncGenerator<StreamChunk>;
   /** Convenience wrapper returning only the text. */
   generate(prompt: string, options?: GenerateOptions): Promise<string>;
 }
@@ -53,6 +60,43 @@ export abstract class BaseProvider implements LLMProvider {
   constructor(readonly model: string) {}
 
   protected abstract request(prompt: string, options: GenerateOptions): Promise<{ text: string; metrics: CompletionMetrics }>;
+
+  /** Streams the completion from the provider; `stream` adds timing and telemetry around it. */
+  protected abstract streamRequest(prompt: string, options: GenerateOptions): AsyncGenerator<StreamChunk>;
+
+  async *stream(prompt: string, options: GenerateOptions = {}): AsyncGenerator<StreamChunk> {
+    const started = Date.now();
+    const base = {
+      projectId: options.projectId,
+      operation: options.operation ?? ("commit_summary" as const),
+      provider: this.id,
+      model: this.model,
+      inputChars: prompt.length + (options.system?.length ?? 0),
+    };
+    let metrics: CompletionMetrics = {};
+    let text = "";
+    try {
+      for await (const chunk of this.streamRequest(prompt, options)) {
+        if (chunk.metrics) metrics = chunk.metrics;
+        else {
+          text += chunk.text;
+          yield chunk;
+        }
+      }
+      if (!text.trim()) throw new Error(`${this.id} returned an empty answer`);
+      const latencyMs = Date.now() - started;
+      if (this.id !== "ollama" && metrics.tokensPerSecond === undefined && metrics.completionTokens && latencyMs > 0) {
+        metrics = { ...metrics, tokensPerSecond: Math.round((metrics.completionTokens / (latencyMs / 1000)) * 10) / 10 };
+      }
+      if (options.operation) emitLlmCall({ ...base, success: true, latencyMs, ...metrics });
+      yield { metrics };
+    } catch (error) {
+      if (options.operation) {
+        emitLlmCall({ ...base, success: false, error: String(error).slice(0, 500), latencyMs: Date.now() - started });
+      }
+      throw error;
+    }
+  }
 
   async complete(prompt: string, options: GenerateOptions = {}): Promise<Completion> {
     const started = Date.now();

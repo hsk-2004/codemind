@@ -1,7 +1,8 @@
 'use client'
-import { AlertCircle, CheckCircle2, FileCode2, Folder, Search } from 'lucide-react'
+import { AlertCircle, CheckCircle2, FileCode2, Folder, Search, Sparkles } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -9,10 +10,12 @@ import { CodeViewer, languageFor } from '@/components/codemind/code-viewer'
 import { EmptyState } from '@/components/codemind/empty-state'
 import { PageHeader } from '@/components/codemind/page-header'
 import { RequireProject } from '@/components/codemind/require-project'
+import { useExplain } from '@/hooks/use-explain'
 import { cn } from '@/lib/utils'
 import { api } from '@/trpc/react'
+import { ExplainSheet } from './explain-sheet'
 
-function FileDetail({ id }: { id: string }) {
+function FileDetail({ id, onExplain }: { id: string; onExplain: () => void }) {
   const { data, isLoading, error } = api.project.getFile.useQuery({ id })
   if (isLoading) return <Skeleton className="h-[60vh]" />
   if (error) return <p className="text-sm text-red-500">{error.message}</p>
@@ -24,6 +27,9 @@ function FileDetail({ id }: { id: string }) {
         <span className="font-mono text-sm">{data.fileName}</span>
         <Badge variant="secondary">{languageFor(data.fileName)}</Badge>
         <span className="text-xs text-muted-foreground">{data.sourceCode.split('\n').length} lines</span>
+        <Button size="sm" className="ml-auto" onClick={onExplain}>
+          <Sparkles /> Explain this file
+        </Button>
       </div>
       <div className="rounded-md border bg-muted/30 p-3 text-sm">
         <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">AI summary (used for retrieval)</p>
@@ -39,6 +45,8 @@ function FilesView({ projectId }: { projectId: string }) {
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const detailRef = useRef<HTMLDivElement>(null)
+  const [explainOpen, setExplainOpen] = useState(false)
+  const explain = useExplain()
 
   const grouped = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -53,6 +61,7 @@ function FilesView({ projectId }: { projectId: string }) {
 
   const embedded = files?.filter((f) => f.embedded).length ?? 0
   const activeId = selected ?? files?.[0]?.id ?? null
+  const activeFile = files?.find((f) => f.id === activeId)
 
   return (
     <div className="space-y-6">
@@ -118,9 +127,30 @@ function FilesView({ projectId }: { projectId: string }) {
           </Card>
 
           <Card ref={detailRef} className="min-w-0 scroll-mt-16 py-4">
-            <CardContent className="px-4">{activeId && <FileDetail id={activeId} />}</CardContent>
+            <CardContent className="px-4">
+              {activeId && (
+                <FileDetail
+                  id={activeId}
+                  onExplain={() => {
+                    setExplainOpen(true)
+                    // Reuse an explanation already written for this file.
+                    if (!explain.states[activeId]) void explain.start(activeId)
+                  }}
+                />
+              )}
+            </CardContent>
           </Card>
         </div>
+      )}
+      {activeId && activeFile && (
+        <ExplainSheet
+          open={explainOpen}
+          onOpenChange={setExplainOpen}
+          fileName={activeFile.fileName}
+          state={explain.states[activeId]}
+          onExplain={() => void explain.start(activeId)}
+          onStop={() => explain.stop(activeId)}
+        />
       )}
     </div>
   )

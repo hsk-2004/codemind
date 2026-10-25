@@ -15,8 +15,8 @@ CodeMind is an AI codebase assistant. It indexes a GitHub repository, answers na
 | Rubric item | Status | Evidence |
 |---|---|---|
 | RAG-based Q&A bot using LangChain (10%) | Done | `src/services/rag/` — LangChain `RunnableSequence` (`ChatPromptTemplate` → `ChatOllama` → `StringOutputParser`), `OllamaEmbeddings`, pgvector retriever scoped per project. Answers cite source files with relevance scores and decline when evidence is missing. |
-| GitHub Actions CI/CD (10%) | Done | `.github/workflows/ci.yml` (lint, type-check, unit and integration tests, build, Docker build), `ai-review.yml` (AI PR review with a local model), `cd.yml` (publishes the Docker image to GHCR). _Sweep.dev: <describe what you set up, or the agreed alternative>._ |
-| Test generation with CodiumAI/Codeium (5%) | _<In progress / done>_ | Vitest suite: 34 unit tests plus pgvector integration tests. _<Add which tests were generated with Qodo/CodiumAI or Codeium, with screenshots.>_ |
+| GitHub Actions CI/CD (10%) | Done | `.github/workflows/ci.yml` (lint, type-check, unit and integration tests, build, Docker build), `ai-review.yml` (AI PR review with a local model), `cd.yml` (publishes the Docker image to GHCR). Sweep.dev is configured through `sweep.yaml` and a `Sweep:` issue template, and Qodo PR-Agent reviews pull requests (`qodo-pr-agent.yml`). _<Add a screenshot of a Sweep-drafted PR once the Sweep GitHub App is installed.>_ |
+| Test generation with CodiumAI/Codeium (5%) | _<In progress / done>_ | Vitest suite: 137 unit tests plus 8 pgvector integration tests. Qodo test generation is described in `docs/test-generation.md`. _<Add which tests were generated with Qodo/CodiumAI or Codeium, with screenshots.>_ |
 | Integration quality and documentation (5%) | Done | README covering architecture diagrams, setup, testing, CI/CD, security, limitations. Zero type errors; lint passes. |
 
 ## 3. Work completed since Phase 1
@@ -27,6 +27,8 @@ CodeMind is an AI codebase assistant. It indexes a GitHub repository, answers na
 4. **Simplified access.** Removed the third-party sign-in service. The app now runs as a single built-in local user, and every vector search is still scoped to one repository.
 5. **Bug fixes found by tests.** Fallback diff summaries counted diff headers as changes and listed one file twice. GitHub URLs with a trailing `/` or `.git` failed to parse.
 6. **Infrastructure.** Multi-stage, non-root Docker image; Docker Compose for the app, PostgreSQL/pgvector and Qdrant; CI/CD on GitHub Actions.
+
+7. **Retrieval and automation (A2).** Hybrid retrieval (vector plus keyword search merged with Reciprocal Rank Fusion), a retrieval evaluation lab (`npm run eval`), and a signed GitHub webhook that analyses new commits on push. Details and demo script: `docs/a2-evaluation.md`.
 
 ## 4. Challenges
 

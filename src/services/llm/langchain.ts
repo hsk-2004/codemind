@@ -5,7 +5,7 @@ import { ChatOllama } from "@langchain/ollama";
 import { GenerationMetricsHandler } from "../rag/generation-metrics";
 import { llmConfig, ollamaHeaders } from "./config";
 import { createProvider } from "./index";
-import type { CompletionMetrics, ModelSelection } from "./provider";
+import type { CompletionMetrics, LLMProvider, ModelSelection } from "./provider";
 
 const ANSWER_MAX_TOKENS = 1024;
 const chatModels = new Map<string, ChatOllama>();
@@ -36,6 +36,34 @@ export interface AnswerModel {
 }
 
 /**
+ * Wraps a cloud provider as a LangChain runnable. The function is an async
+ * generator, so LangChain streams its text pieces through the chain, and
+ * `invoke` still returns the whole answer.
+ */
+export function answerModelFromProvider(provider: LLMProvider): AnswerModel {
+  let metrics: CompletionMetrics = {};
+  const llm = RunnableLambda.from(async function* (prompt: ChatPromptValueInterface, config?: { signal?: AbortSignal }) {
+    const messages = prompt.toChatMessages();
+    const textOf = (type: string) =>
+      messages
+        .filter((m) => m.getType() === type)
+        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+        .join("\n\n");
+    metrics = {};
+    for await (const chunk of provider.stream(textOf("human"), {
+      system: textOf("system") || undefined,
+      temperature: 0.2,
+      maxTokens: ANSWER_MAX_TOKENS,
+      signal: config?.signal,
+    })) {
+      if (chunk.metrics) metrics = chunk.metrics;
+      else yield chunk.text;
+    }
+  });
+  return { llm, getMetrics: () => metrics };
+}
+
+/**
  * Returns the selected model as a LangChain runnable.
  * Local models use LangChain's ChatOllama. Cloud models go through CodeMind's
  * own provider classes, wrapped so they fit the same chain.
@@ -45,23 +73,5 @@ export function createAnswerModel(selection: ModelSelection): AnswerModel {
     const handler = new GenerationMetricsHandler();
     return { llm: getChatModel(selection.model), callbacks: [handler], getMetrics: () => handler.metrics ?? {} };
   }
-
-  const provider = createProvider(selection);
-  let metrics: CompletionMetrics = {};
-  const llm = RunnableLambda.from(async (prompt: ChatPromptValueInterface) => {
-    const messages = prompt.toChatMessages();
-    const textOf = (type: string) =>
-      messages
-        .filter((m) => m.getType() === type)
-        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
-        .join("\n\n");
-    const completion = await provider.complete(textOf("human"), {
-      system: textOf("system") || undefined,
-      temperature: 0.2,
-      maxTokens: ANSWER_MAX_TOKENS,
-    });
-    metrics = completion.metrics;
-    return completion.text;
-  });
-  return { llm, getMetrics: () => metrics };
+  return answerModelFromProvider(createProvider(selection));
 }

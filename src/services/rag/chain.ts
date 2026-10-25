@@ -4,10 +4,11 @@ import { StringOutputParser } from "@langchain/core/output_parsers";
 import { RunnableSequence, type RunnableLike } from "@langchain/core/runnables";
 import type { ProviderId } from "@/services/llm/provider";
 import { bestExcerpt } from "./excerpt";
+import { NO_CONTEXT_ANSWER } from "@/lib/ask-types";
+import { withHistory, type ChatTurn } from "./history";
 import { directPrompt, ragPrompt } from "./prompt";
 
-export const NO_CONTEXT_ANSWER =
-  "I couldn't find enough relevant information in the indexed repository to answer this confidently.";
+export { NO_CONTEXT_ANSWER };
 
 export interface SourceMetadata {
   source: string;
@@ -88,6 +89,11 @@ export interface RagAnswer {
   sources: SourceDocument[];
 }
 
+export interface StreamOptions {
+  history?: ChatTurn[];
+  signal?: AbortSignal;
+}
+
 export function createRagChain({
   llm,
   retrieve,
@@ -101,7 +107,7 @@ export function createRagChain({
 }) {
   const generate = RunnableSequence.from([ragPrompt, llm, new StringOutputParser()]).withConfig({ callbacks });
 
-  return async function answerQuestion(question: string): Promise<RagAnswer> {
+  return async function answerQuestion(question: string, history: ChatTurn[] = []): Promise<RagAnswer> {
     const sources = await retrieve(question);
 
     // No evidence -> say so honestly instead of letting the model guess.
@@ -109,8 +115,28 @@ export function createRagChain({
       return { answer: NO_CONTEXT_ANSWER, sources: [] };
     }
 
-    const answer = await generate.invoke({ context: formatContext(sources, limits, question), question });
+    const answer = await generate.invoke({ context: formatContext(sources, limits, question), question: withHistory(question, history) });
     return { answer: answer.trim(), sources };
+  };
+}
+
+/**
+ * Streaming version of the RAG answer: sources are retrieved by the caller, then
+ * the answer arrives piece by piece as the model writes it.
+ */
+export function createRagStream({
+  llm,
+  callbacks,
+  limits = DEFAULT_CONTEXT_LIMITS,
+}: {
+  llm: RunnableLike;
+  callbacks?: Callbacks;
+  limits?: ContextLimits;
+}) {
+  const generate = RunnableSequence.from([ragPrompt, llm, new StringOutputParser()]).withConfig({ callbacks });
+
+  return function streamAnswer(sources: SourceDocument[], question: string, { history = [], signal }: StreamOptions = {}) {
+    return generate.stream({ context: formatContext(sources, limits, question), question: withHistory(question, history) }, { signal });
   };
 }
 
@@ -124,5 +150,14 @@ export function createDirectChain({ llm, callbacks }: { llm: RunnableLike; callb
   return async function answerWithoutContext(question: string, repository: string): Promise<string> {
     const answer = await generate.invoke({ repository, question });
     return answer.trim();
+  };
+}
+
+/** Streaming version of the answer without retrieval. */
+export function createDirectStream({ llm, callbacks }: { llm: RunnableLike; callbacks?: Callbacks }) {
+  const generate = RunnableSequence.from([directPrompt, llm, new StringOutputParser()]).withConfig({ callbacks });
+
+  return function streamWithoutContext(question: string, repository: string, { history = [], signal }: StreamOptions = {}) {
+    return generate.stream({ repository, question: withHistory(question, history) }, { signal });
   };
 }

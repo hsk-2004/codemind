@@ -1,0 +1,39 @@
+name: Qodo PR-Agent
+
+# Qodo (formerly CodiumAI) PR-Agent reviews every pull request: it writes a
+# description, reviews the diff and suggests improvements and missing tests.
+# It needs a GEMINI_API_KEY repository secret and skips itself without one,
+# so forks and CI runs without the secret never fail.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  pr_agent:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Run PR-Agent
+        if: env.GEMINI_KEY != ''
+        uses: qodo-ai/pr-agent@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # PR-Agent reads .pr_agent.toml from the default branch, so the model is also set here.
+          # That way it works on a pull request before the config file has been merged.
+          config.model: "gemini/gemini-flash-latest"
+          config.fallback_models: '["gemini/gemini-flash-lite-latest"]'
+          config.custom_model_max_tokens: "1000000"
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"

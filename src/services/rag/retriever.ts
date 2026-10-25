@@ -2,6 +2,7 @@ import { Document } from "@langchain/core/documents";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type { PrismaClient } from "@prisma/client";
 import type { Retrieve, SourceDocument, SourceMetadata } from "./chain";
+import { keywordTerms, reciprocalRankFusion, toTsQuery } from "./fusion";
 
 export interface RetrieverOptions {
   k?: number;
@@ -116,15 +117,82 @@ export function createChunkRetriever(
   };
 }
 
-/** Uses the function-level index when the project has one, and the file index otherwise. */
+export type RetrievalMode = "vector" | "hybrid";
+
+const chunkKey = (row: Pick<ChunkRow, "fileName" | "startLine" | "endLine">) => `${row.fileName}:${row.startLine}-${row.endLine}`;
+
+/**
+ * Keyword search over the same chunks, using PostgreSQL full-text search. It
+ * finds exact identifiers (function and variable names) that an embedding can
+ * blur. Filtered by projectId like every other retriever.
+ */
+export async function searchChunksByKeyword(db: PrismaClient, projectId: string, question: string, limit: number): Promise<ChunkRow[]> {
+  const terms = keywordTerms(question);
+  if (terms.length === 0) return [];
+  const tsQuery = toTsQuery(terms);
+  return db.$queryRaw<ChunkRow[]>`
+    SELECT "fileName", "symbol", "startLine", "endLine", "content",
+           ts_rank(to_tsvector('simple', "content" || ' ' || coalesce("symbol", '')), to_tsquery('simple', ${tsQuery})) AS similarity
+    FROM "CodeChunk"
+    WHERE "projectId" = ${projectId}
+      AND to_tsvector('simple', "content" || ' ' || coalesce("symbol", '')) @@ to_tsquery('simple', ${tsQuery})
+    ORDER BY similarity DESC
+    LIMIT ${limit}
+  `;
+}
+
+/**
+ * Hybrid retriever: runs the vector search and the keyword search, then merges
+ * the two ranked lists with Reciprocal Rank Fusion. A chunk that both searches
+ * agree on ranks first, and a chunk only one search found is still kept.
+ */
+export function createHybridChunkRetriever(
+  db: PrismaClient,
+  embeddings: EmbeddingsInterface,
+  projectId: string,
+  { k = 8, minScore = 0.3 }: RetrieverOptions = {},
+): Retrieve {
+  return async (question: string): Promise<SourceDocument[]> => {
+    const vector = await embeddings.embedQuery(question);
+    const candidates = k * 3;
+    const vectorLiteral = `[${vector.join(",")}]`;
+
+    const [semantic, keyword] = await Promise.all([
+      vector.length === 0
+        ? Promise.resolve([] as ChunkRow[])
+        : db.$queryRaw<ChunkRow[]>`
+            SELECT "fileName", "symbol", "startLine", "endLine", "content",
+                   1 - ("embedding" <=> ${vectorLiteral}::vector) AS similarity
+            FROM "CodeChunk"
+            WHERE "projectId" = ${projectId}
+              AND "embedding" IS NOT NULL
+              AND 1 - ("embedding" <=> ${vectorLiteral}::vector) > ${minScore}
+            ORDER BY similarity DESC
+            LIMIT ${candidates}
+          `,
+      searchChunksByKeyword(db, projectId, question, candidates),
+    ]);
+
+    // Keyword ranks are not similarities, so keyword-only hits are shown at the minimum score.
+    const keywordOnly = keyword.map((row) => ({ ...row, similarity: minScore }));
+    const fused = reciprocalRankFusion([semantic, keywordOnly], chunkKey).slice(0, k);
+    return groupChunksByFile(fused.map(({ item }) => item));
+  };
+}
+
+/**
+ * Uses the function-level index when the project has one, and the file index
+ * otherwise. `mode: "hybrid"` adds keyword search to the function-level index.
+ */
 export async function createProjectRetriever(
   db: PrismaClient,
   embeddings: EmbeddingsInterface,
   projectId: string,
   chunkCount: number,
-): Promise<{ retrieve: Retrieve; level: "function" | "file" }> {
+  mode: RetrievalMode = process.env.RETRIEVAL_MODE === "hybrid" ? "hybrid" : "vector",
+): Promise<{ retrieve: Retrieve; level: "function" | "file"; mode: RetrievalMode }> {
   const hasChunks = (await db.codeChunk.count({ where: { projectId } })) > 0;
-  return hasChunks
-    ? { retrieve: createChunkRetriever(db, embeddings, projectId, { k: chunkCount }), level: "function" }
-    : { retrieve: createPgVectorRetriever(db, embeddings, projectId), level: "file" };
+  if (!hasChunks) return { retrieve: createPgVectorRetriever(db, embeddings, projectId), level: "file", mode: "vector" };
+  const make = mode === "hybrid" ? createHybridChunkRetriever : createChunkRetriever;
+  return { retrieve: make(db, embeddings, projectId, { k: chunkCount }), level: "function", mode };
 }
