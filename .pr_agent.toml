@@ -2,8 +2,8 @@
 # Used by .github/workflows/qodo-pr-agent.yml. Docs: https://qodo-merge-docs.qodo.ai
 [config]
 # Cloud model through a Google AI Studio key. Change the model to match your key.
-model = "gemini/gemini-2.5-flash"
-fallback_models = ["gemini/gemini-2.5-flash-lite"]
+model = "gemini/gemini-flash-latest"
+fallback_models = ["gemini/gemini-flash-lite-latest"]
 
 [pr_reviewer]
 require_tests_label = true

@@ -31,8 +31,8 @@ jobs:
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # PR-Agent reads .pr_agent.toml from the default branch, so the model is also set here.
           # That way it works on a pull request before the config file has been merged.
-          config.model: "gemini/gemini-2.5-flash"
-          config.fallback_models: '["gemini/gemini-2.5-flash-lite"]'
+          config.model: "gemini/gemini-flash-latest"
+          config.fallback_models: '["gemini/gemini-flash-lite-latest"]'
           config.custom_model_max_tokens: "1000000"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
