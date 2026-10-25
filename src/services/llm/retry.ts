@@ -8,6 +8,8 @@ export interface RetryOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Abort each attempt after this long. */
   timeoutMs?: number;
+  /** Abort everything when the caller gives up (for example the user pressed Stop). */
+  signal?: AbortSignal;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -16,11 +18,12 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 export async function fetchWithRetry(
   url: string,
   init: RequestInit,
-  { attempts = 3, baseDelayMs = 1500, sleep = defaultSleep, timeoutMs }: RetryOptions = {},
+  { attempts = 3, baseDelayMs = 1500, sleep = defaultSleep, timeoutMs, signal }: RetryOptions = {},
 ): Promise<Response> {
   let last: Response | undefined;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    last = await fetch(url, timeoutMs ? { ...init, signal: AbortSignal.timeout(timeoutMs) } : init);
+    const signals = [timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined, signal].filter((s): s is AbortSignal => s !== undefined);
+    last = await fetch(url, signals.length > 0 ? { ...init, signal: AbortSignal.any(signals) } : init);
     if (last.ok || !RETRYABLE.has(last.status) || attempt === attempts) return last;
     await sleep(baseDelayMs * 2 ** (attempt - 1));
   }

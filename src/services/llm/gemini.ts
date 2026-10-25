@@ -1,5 +1,6 @@
+import { readSseData } from "@/lib/stream-lines";
 import { cloudConfig } from "./config";
-import { BaseProvider, type CompletionMetrics, type GenerateOptions } from "./provider";
+import { BaseProvider, type CompletionMetrics, type GenerateOptions, type StreamChunk } from "./provider";
 import { fetchWithRetry, providerError, type RetryOptions } from "./retry";
 
 export const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -72,5 +73,43 @@ export class GeminiProvider extends BaseProvider {
         completionTokens: data.usageMetadata?.candidatesTokenCount,
       },
     };
+  }
+
+  protected async *streamRequest(prompt: string, options: GenerateOptions): AsyncGenerator<StreamChunk> {
+    if (!this.apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+    const res = await fetchWithRetry(
+      `${GEMINI_API_BASE}/models/${encodeURIComponent(this.model)}:streamGenerateContent?alt=sse`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
+        body: JSON.stringify({
+          ...(options.system ? { systemInstruction: { parts: [{ text: options.system }] } } : {}),
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: options.temperature ?? 0.2,
+            maxOutputTokens: (options.maxTokens ?? 512) + THINKING_HEADROOM_TOKENS,
+          },
+        }),
+      },
+      { ...this.retry, signal: options.signal },
+    );
+    if (!res.ok || !res.body) throw await providerError("Gemini", res);
+
+    let usage: GeminiResponse["usageMetadata"];
+    let blocked: string | undefined;
+    for await (const data of readSseData(res.body)) {
+      const chunk = JSON.parse(data) as GeminiResponse;
+      const candidate = chunk.candidates?.[0];
+      const text = (candidate?.content?.parts ?? [])
+        .filter((part) => !part.thought)
+        .map((part) => part.text ?? "")
+        .join("");
+      if (text) yield { text };
+      usage = chunk.usageMetadata ?? usage;
+      blocked = chunk.promptFeedback?.blockReason ?? blocked;
+    }
+    if (blocked) throw new Error(`Gemini returned an empty answer (${blocked})`);
+    yield { metrics: { promptTokens: usage?.promptTokenCount, completionTokens: usage?.candidatesTokenCount } };
   }
 }

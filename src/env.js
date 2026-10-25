@@ -24,6 +24,9 @@ export const env = createEnv({
     QDRANT_URL: z.string().url().default("http://localhost:6333"),
 
     GITHUB_TOKEN: z.string().optional(),
+    GITHUB_WEBHOOK_SECRET: z.string().optional(),
+
+    RETRIEVAL_MODE: z.enum(["vector", "hybrid"]).default("vector"),
 
     GEMINI_API_KEY: z.string().optional(),
     GROQ_API_KEY: z.string().optional(),
@@ -58,6 +61,8 @@ export const env = createEnv({
     QDRANT_URL: process.env.QDRANT_URL,
 
     GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+    GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
+    RETRIEVAL_MODE: process.env.RETRIEVAL_MODE,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
     GROQ_API_KEY: process.env.GROQ_API_KEY,
 

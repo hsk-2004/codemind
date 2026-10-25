@@ -1,4 +1,5 @@
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
+import { evaluationRouter } from "./routers/evaluation";
 import { projectRouter } from "./routers/project";
 import { metricsRouter } from "./routers/metrics";
 import { modelsRouter } from "./routers/models";
@@ -9,6 +10,7 @@ export const appRouter = createTRPCRouter({
   system: systemRouter,
   metrics: metricsRouter,
   models: modelsRouter,
+  evaluation: evaluationRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -24,6 +24,7 @@ const RANGES = [
 const OPERATION_LABELS: Record<string, string> = {
   rag_answer: 'RAG answer',
   rag_escalation: 'Escalated RAG answer (larger model)',
+  file_explanation: 'File explanation',
   direct_answer: 'Answer without RAG',
   file_summary: 'File summary',
   commit_summary: 'Commit summary',

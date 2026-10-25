@@ -1,0 +1,12 @@
+[
+  { "question": "How are GitHub webhook signatures verified?", "expectedFiles": ["src/lib/github-webhook.ts"] },
+  { "question": "Where is the GitHub repository URL parsed and validated?", "expectedFiles": ["src/lib/github-url.ts"] },
+  { "question": "How does Reciprocal Rank Fusion merge the vector and keyword results?", "expectedFiles": ["src/services/rag/fusion.ts"] },
+  { "question": "How is the retrieved context cut down to fit the small local model window?", "expectedFiles": ["src/services/rag/chain.ts", "src/services/rag/excerpt.ts"] },
+  { "question": "How are files split into function-level chunks?", "expectedFiles": ["src/services/rag/chunking.ts"] },
+  { "question": "How does the app decide to escalate an answer to a larger model?", "expectedFiles": ["src/services/rag/escalation.ts"] },
+  { "question": "Where is the pgvector cosine similarity query?", "expectedFiles": ["src/services/rag/retriever.ts"] },
+  { "question": "How are breaking changes detected in a commit diff?", "expectedFiles": ["src/lib/ai.ts"] },
+  { "question": "How are commits polled and summarised?", "expectedFiles": ["src/lib/github.ts"] },
+  { "question": "Where are Prometheus metrics defined?", "expectedFiles": ["src/services/telemetry.ts"] }
+]

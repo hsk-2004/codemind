@@ -25,6 +25,19 @@ Developers joining an unfamiliar codebase spend days reading files to learn how 
 | Dashboard | Commit log, breaking-change monitor and trends, saved Q&A. |
 | AI-enhanced CI | On every pull request, GitHub Actions runs CodeMind's own analysis on the diff and posts a review comment. |
 
+## New in this version
+
+| Feature | Where | What it does |
+|---|---|---|
+| Streaming answers | Ask AI | The answer is written word by word, sources appear first, and **Stop** cancels the model. Works with local, Gemini and Groq models. |
+| Chat history | Ask AI | Follow-up questions such as "and where is it used?" remember the last 3 questions. The chat is kept per repository in the browser. |
+| Compare models | `/compare` | One question answered by two to four models side by side (local, Gemini, Groq), with first-word time, total time, speed, size and charts. |
+| Retrieval lab | `/evaluation` | Scores vector and hybrid search on questions with known answers: hit rate, MRR and precision. Same code as `npm run eval`. |
+| Explain this file | Repository files | A side panel lists the functions in a file, then streams a plain-English explanation. |
+| Export report | Dashboard | Downloads a PDF summary: overview, languages and tooling, breaking changes, saved answers and AI usage. |
+
+Try them on this repository with no GitHub access: `npm run index:local -- . CodeMind`.
+
 ## Pages
 
 | Page | What it shows |
@@ -206,6 +219,8 @@ npm test                  # unit tests (LLM mocked, no services needed)
 npm run test:integration  # needs a running pgvector database (DATABASE_URL)
 npm run typecheck
 npm run lint
+npm run eval -- <projectId>   # retrieval evaluation lab: vector vs hybrid on a fixed question set
+npm run index:local -- . Name # index a local folder offline (no GitHub, no LLM calls)
 ```
 
 | Suite | What it covers |
@@ -217,7 +232,11 @@ npm run lint
 | `tests/unit/excerpt.test.ts` | Question keywords; choosing the matching part of a long file; fallbacks |
 | `tests/unit/github-url.test.ts` | Repository URL parsing and validation |
 | `tests/unit/prompts.test.ts` | Prompt truncation; the breaking-change prompt contains only valid JSON examples |
+| `tests/unit/fusion.test.ts` | Keyword extraction (query-syntax safe) and Reciprocal Rank Fusion |
+| `tests/unit/eval-metrics.test.ts` | Hit rate, MRR and precision for the evaluation lab |
+| `tests/unit/github-webhook.test.ts` | Webhook HMAC signature check, push payload parsing, project matching |
 | `tests/integration/retriever.test.ts` | Real pgvector: **repository isolation**, similarity threshold, ranking order |
+| `tests/integration/hybrid.test.ts` | Real pgvector + full-text search: exact identifiers found, hybrid merge, repository isolation |
 
 ## CI/CD
 
@@ -225,9 +244,15 @@ npm run lint
 |---|---|---|
 | `ci.yml` | push to `main`, pull requests | install → lint → type-check → unit tests → schema push → integration tests (pgvector service) → production build → Docker image build |
 | `ai-review.yml` | pull requests | starts Ollama in the runner with `qwen2.5-coder:0.5b`, runs `scripts/ai-pr-review.ts` on the PR diff, and posts the summary and breaking-change verdict as a PR comment. Advisory only; it never blocks merging. |
+| `qodo-pr-agent.yml` | pull requests | Qodo (CodiumAI) PR-Agent writes a description, reviews the diff and suggests improvements and tests. Needs a `GEMINI_API_KEY` secret and skips itself without one. |
+| `sweep.yaml` | issues titled `Sweep:` | [Sweep.dev](https://sweep.dev) AI agent drafts a pull request from the issue, using the repository rules in `sweep.yaml`. Needs the Sweep GitHub App installed. |
 | `cd.yml` | after CI succeeds on `main` | builds the production image and publishes it to `ghcr.io/<owner>/<repo>` tagged with the commit SHA and `latest` |
 
 CI never calls a live LLM for tests, because the model is mocked. No repository secrets are needed to build.
+
+### GitHub webhook
+
+Set `GITHUB_WEBHOOK_SECRET` in `.env`, then add a webhook in the repository settings: Payload URL `<app-url>/api/webhooks/github`, content type `application/json`, the same secret, and the **push** event. A push to the default branch makes CodeMind fetch and analyse the new commits for the matching project. Requests with a missing or wrong HMAC signature are rejected.
 
 ## Observability
 
@@ -265,18 +290,26 @@ CodeMind can run on Vercel while the models run on your own laptop. A token-prot
 ## Limitations
 
 - A 3B-parameter model handles focused questions well but can miss details in questions that span many files.
-- Files are summarised and retrieved whole. Function-level chunking would improve precision.
+- Retrieval searches function-level chunks, but chunk boundaries come from a text splitter, not a syntax tree.
+- Hybrid retrieval is opt-in (`RETRIEVAL_MODE=hybrid`) until `npm run eval` shows it helps on your repository.
 - Indexing runs synchronously when a project is created and takes a few minutes on local hardware.
 - Breaking-change detection is advisory and can miss or over-flag changes.
 
 ## Roadmap
 
-- Function-level chunking with Tree-sitter, with chunks stored in Qdrant
-- Background indexing jobs with live progress
-- ZIP upload as a second repository source
-- Streaming answers
-- Semantic search page, code explainer and AI debugger
-- Evaluation lab comparing chunking strategies, retrieval strategies and models
+Done since the first evaluation: function-level chunk index, hybrid retrieval (vector + keyword, Reciprocal Rank Fusion), retrieval evaluation lab, GitHub webhook that analyses new commits on push, Sweep.dev and Qodo PR-Agent setup.
+
+Next:
+
+- Tree-sitter chunking and a code graph ("who calls this?")
+- Reranking of fused results
+- Incremental re-indexing of changed files
+- Qdrant as the main vector store
+- Background indexing jobs with live progress, and streaming answers
+- GitHub OAuth, private repositories and multiple users
+- PR review bot with inline comments, and a VS Code extension
+
+See [docs/a2-evaluation.md](docs/a2-evaluation.md) for the reasoning behind each item.
 
 ## Acknowledgements
 
