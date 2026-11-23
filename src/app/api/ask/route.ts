@@ -2,6 +2,7 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { assertAskAccess, runAsk } from "@/server/ask";
 import { ensureLocalUser } from "@/server/local-user";
+import { traceLangfuseGenerator } from "@/services/observability/langfuse";
 import { errorMessage, ndjsonResponse } from "@/server/ndjson-response";
 
 // A local model can take a while on a slow machine.
@@ -35,5 +36,10 @@ export async function POST(request: Request) {
     return Response.json({ error: errorMessage(error) }, { status: 403 });
   }
 
-  return ndjsonResponse(request, (signal) => runAsk(db, userId, { ...input, signal }));
+  return ndjsonResponse(request, (signal) =>
+    traceLangfuseGenerator(
+      { name: "ask", userId, sessionId: input.projectId, tags: ["ask", input.mode], input: input.question, metadata: { projectId: input.projectId, mode: input.mode, historyTurns: input.history?.length ?? 0 } },
+      () => runAsk(db, userId, { ...input, signal }),
+    ),
+  );
 }

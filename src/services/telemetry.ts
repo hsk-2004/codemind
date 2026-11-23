@@ -1,5 +1,11 @@
 export type LlmOperation = "rag_answer" | "rag_escalation" | "direct_answer" | "file_summary" | "commit_summary" | "breaking_change" | "embedding" | "file_explanation";
 
+/** One message of a chat prompt, as it was sent to a model. */
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 export interface LlmCallEvent {
   projectId?: string;
   operation: LlmOperation;
@@ -17,6 +23,14 @@ export interface LlmCallEvent {
   promptEvalMs?: number;
   evalMs?: number;
   tokensPerSecond?: number;
+  /** Milliseconds from the call starting to the first word of the reply. */
+  firstTokenMs?: number;
+  /** What was sent to the model: the chat messages, or plain text. Used for tracing only. */
+  input?: string | ChatMessage[];
+  /** What came back: the reply text. Used for tracing only. */
+  output?: string;
+  /** Extra facts for tracing, such as how many texts an embedding call covered. */
+  metadata?: Record<string, string | number | boolean>;
 }
 
 /** Raw timing fields returned by Ollama (durations in nanoseconds). */
@@ -47,7 +61,10 @@ export function timingsToMetrics(t: OllamaTimings | undefined): Partial<LlmCallE
 }
 
 type Listener = (event: LlmCallEvent) => void;
-const listeners = new Set<Listener>();
+
+// Kept on globalThis so listeners survive a hot reload in development, when this module is evaluated again.
+const globalForListeners = globalThis as unknown as { codemindLlmListeners?: Set<Listener> };
+const listeners = (globalForListeners.codemindLlmListeners ??= new Set<Listener>());
 
 export function onLlmCall(listener: Listener): () => void {
   listeners.add(listener);

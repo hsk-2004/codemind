@@ -59,14 +59,14 @@ export async function* runExplain(db: PrismaClient, file: { fileName: string; so
     if (!output) throw new Error("The model returned an empty explanation.");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    emitLlmCall({ ...base, success: false, error: (signal?.aborted ? "cancelled" : message).slice(0, 500), latencyMs: Date.now() - started });
+    emitLlmCall({ ...base, success: false, error: (signal?.aborted ? "cancelled" : message).slice(0, 500), latencyMs: Date.now() - started, input: model.getPrompt(), output: output || undefined });
     if (signal?.aborted) throw error;
     const info = PROVIDER_INFO[active.provider];
     throw new Error(info.location === "cloud" ? `${info.label} (${active.model}) failed: ${message}` : "The local model did not respond. Make sure Ollama is running, then try again.");
   }
 
   const metrics = model.getMetrics();
-  emitLlmCall({ ...base, success: true, latencyMs: Date.now() - started, ...metrics });
+  emitLlmCall({ ...base, success: true, latencyMs: Date.now() - started, input: model.getPrompt(), output, firstTokenMs: firstTokenAt ? firstTokenAt - started : undefined, ...metrics });
   const meta: ExplainMeta = {
     provider: active.provider,
     providerLabel: PROVIDER_INFO[active.provider].label,

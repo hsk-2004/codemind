@@ -1,4 +1,4 @@
-import { emitLlmCall, type LlmCallEvent, type LlmOperation } from "../telemetry";
+import { emitLlmCall, type ChatMessage, type LlmCallEvent, type LlmOperation } from "../telemetry";
 
 export type ProviderId = "ollama" | "gemini" | "groq";
 
@@ -53,6 +53,10 @@ export interface LLMProvider {
   generate(prompt: string, options?: GenerateOptions): Promise<string>;
 }
 
+function chatInput(prompt: string, system?: string): ChatMessage[] {
+  return system ? [{ role: "system", content: system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }];
+}
+
 /** Shared timing and telemetry for all providers; subclasses implement `request`. */
 export abstract class BaseProvider implements LLMProvider {
   abstract readonly id: ProviderId;
@@ -72,6 +76,7 @@ export abstract class BaseProvider implements LLMProvider {
       provider: this.id,
       model: this.model,
       inputChars: prompt.length + (options.system?.length ?? 0),
+      input: chatInput(prompt, options.system),
     };
     let metrics: CompletionMetrics = {};
     let text = "";
@@ -88,7 +93,7 @@ export abstract class BaseProvider implements LLMProvider {
       if (this.id !== "ollama" && metrics.tokensPerSecond === undefined && metrics.completionTokens && latencyMs > 0) {
         metrics = { ...metrics, tokensPerSecond: Math.round((metrics.completionTokens / (latencyMs / 1000)) * 10) / 10 };
       }
-      if (options.operation) emitLlmCall({ ...base, success: true, latencyMs, ...metrics });
+      if (options.operation) emitLlmCall({ ...base, success: true, latencyMs, output: text, ...metrics });
       yield { metrics };
     } catch (error) {
       if (options.operation) {
@@ -106,6 +111,7 @@ export abstract class BaseProvider implements LLMProvider {
       provider: this.id,
       model: this.model,
       inputChars: prompt.length + (options.system?.length ?? 0),
+      input: chatInput(prompt, options.system),
     };
     try {
       const { text, metrics } = await this.request(prompt, options);
@@ -115,7 +121,7 @@ export abstract class BaseProvider implements LLMProvider {
       if (this.id !== "ollama" && metrics.tokensPerSecond === undefined && metrics.completionTokens && latencyMs > 0) {
         metrics.tokensPerSecond = Math.round((metrics.completionTokens / (latencyMs / 1000)) * 10) / 10;
       }
-      if (options.operation) emitLlmCall({ ...base, success: true, latencyMs, ...metrics });
+      if (options.operation) emitLlmCall({ ...base, success: true, latencyMs, output: text, ...metrics });
       return { text: text.trim(), metrics, latencyMs };
     } catch (error) {
       if (options.operation) {

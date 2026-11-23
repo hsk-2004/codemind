@@ -24,6 +24,8 @@ async function timedEmbed<T>(texts: string[], projectId: string | undefined, run
     operation: "embedding" as const,
     model: embeddingConfig.model,
     inputChars: texts.reduce((n, t) => n + t.length, 0),
+    input: texts.length === 1 ? texts[0] : texts.slice(0, 3).join("\n---\n"),
+    metadata: { texts: texts.length },
   };
   try {
     const result = await run();

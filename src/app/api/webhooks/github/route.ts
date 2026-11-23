@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/env";
 import { parsePushEvent, projectMatchesRepo, verifyGithubSignature } from "@/lib/github-webhook";
 import { pollCommits } from "@/lib/github";
+import { withLangfuseTrace } from "@/services/observability/langfuse";
 import { db } from "@/server/db";
 
 /**
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
 
   // Analysis takes a while on local models, so answer GitHub now and work in the background.
   for (const project of projects) {
-    void pollCommits(project.id).catch((error: unknown) => console.error(`webhook: analysis failed for ${project.id}`, error));
+    void withLangfuseTrace({ name: "webhook-commit-analysis", sessionId: project.id, tags: ["webhook"], metadata: { projectId: project.id } }, () => pollCommits(project.id)).catch((error: unknown) => console.error(`webhook: analysis failed for ${project.id}`, error));
   }
   return NextResponse.json({ accepted: projects.length, repo: push.repo }, { status: 202 });
 }

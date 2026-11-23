@@ -12,6 +12,7 @@ import { ESCALATION_REASONS, escalationReason, modelTiers } from "@/services/rag
 import { retrievalQuery, trimHistory, type ChatTurn } from "@/services/rag/history";
 import { RAG_PROMPT_VERSION } from "@/services/rag/prompt";
 import { createProjectRetriever } from "@/services/rag/retriever";
+import { annotateLangfuseTrace, recordLangfuseRetrieval } from "@/services/observability/langfuse";
 import { emitLlmCall, type LlmOperation } from "@/services/telemetry";
 
 export interface AskInput {
@@ -86,11 +87,11 @@ async function* generate(
     answer = answer.trim();
     if (!answer) throw new Error("The model returned an empty answer.");
     const metrics = model.getMetrics();
-    emitLlmCall({ projectId, operation, provider: selection.provider, model: selection.model, success: true, inputChars: question.length, latencyMs: Date.now() - started, ...metrics });
+    emitLlmCall({ projectId, operation, provider: selection.provider, model: selection.model, success: true, inputChars: question.length, latencyMs: Date.now() - started, input: model.getPrompt() ?? question, output: answer, firstTokenMs: firstTokenAt ? firstTokenAt - started : undefined, ...metrics });
     return { answer, firstTokenAt, metrics };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    emitLlmCall({ projectId, operation, provider: selection.provider, model: selection.model, success: false, error: (signal?.aborted ? "cancelled" : message).slice(0, 500), inputChars: question.length, latencyMs: Date.now() - started });
+    emitLlmCall({ projectId, operation, provider: selection.provider, model: selection.model, success: false, error: (signal?.aborted ? "cancelled" : message).slice(0, 500), inputChars: question.length, latencyMs: Date.now() - started, input: model.getPrompt() ?? question, output: answer || undefined });
     if (signal?.aborted) throw error;
     const info = PROVIDER_INFO[selection.provider];
     // Cloud errors (rate limit, overloaded model) are worth showing as they are.
@@ -136,6 +137,12 @@ export async function* runAsk(db: PrismaClient, userId: string, input: AskInput)
     // A follow-up is searched together with the question before it.
     sources = await retriever.retrieve(retrievalQuery(history, question));
     retrievalMs = Date.now() - started;
+    recordLangfuseRetrieval({
+      query: retrievalQuery(history, question),
+      sources: sources.map((d) => ({ file: d.metadata.source, score: d.metadata.score })),
+      ms: retrievalMs,
+      metadata: { level: retrievalLevel, mode: retrievalMode },
+    });
   }
   const filesReferences = sources.map(toReference);
   yield { type: "sources", filesReferences, retrievalMs };
@@ -216,5 +223,6 @@ export async function* runAsk(db: PrismaClient, userId: string, input: AskInput)
     ...(result?.metrics ?? {}),
   };
   console.log(JSON.stringify({ event: "answer", projectId, ...meta, suggestion: suggestion ? { to: suggestion.to.model, reason: suggestion.reason } : undefined }));
+  annotateLangfuseTrace({ output, metadata: { model: meta.model, provider: meta.provider, mode, sourcesUsed: sources.length, grounded: meta.grounded, totalMs, promptTokens: meta.promptTokens, completionTokens: meta.completionTokens } });
   yield { type: "done", output, filesReferences, meta };
 }

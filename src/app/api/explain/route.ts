@@ -3,6 +3,7 @@ import { db } from "@/server/db";
 import { loadFileForExplain, runExplain } from "@/server/explain";
 import { ensureLocalUser } from "@/server/local-user";
 import { ndjsonResponse } from "@/server/ndjson-response";
+import { traceLangfuseGenerator } from "@/services/observability/langfuse";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -17,5 +18,10 @@ export async function POST(request: Request) {
   const loaded = await loadFileForExplain(db, await ensureLocalUser(db), parsed.data.fileId);
   if (loaded.status !== 200) return Response.json({ error: loaded.error }, { status: loaded.status });
 
-  return ndjsonResponse(request, (signal) => runExplain(db, loaded.file, signal));
+  return ndjsonResponse(request, (signal) =>
+    traceLangfuseGenerator(
+      { name: "explain-file", sessionId: loaded.file.projectId, tags: ["explain"], input: loaded.file.fileName, metadata: { projectId: loaded.file.projectId, fileName: loaded.file.fileName } },
+      () => runExplain(db, loaded.file, signal),
+    ),
+  );
 }

@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 import { db } from "@/server/db";
 import { ensureLocalUser } from "@/server/local-user";
 import { syncActiveModel } from "@/server/model-settings";
+import { withLangfuseTrace } from "@/services/observability/langfuse";
 
 export const createTRPCContext = async (opts: { headers: Headers }) => {
   return {
@@ -39,4 +40,7 @@ const withLocalUser = t.middleware(async ({ next, ctx }) => {
   return next({ ctx: { ...ctx, user: { userId } } });
 });
 
-export const appProcedure = t.procedure.use(withLocalUser);
+/** Groups the model calls a procedure makes (indexing, commit analysis, ...) under one trace named after it. */
+const withTracing = t.middleware(({ next, path, type }) => withLangfuseTrace({ name: `trpc:${path}`, tags: ["trpc", type] }, () => next()));
+
+export const appProcedure = t.procedure.use(withLocalUser).use(withTracing);

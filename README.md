@@ -271,6 +271,12 @@ Indexing runs are recorded in `IndexingJob` (stage, counters, stage timings, eve
 docker compose --profile monitoring up -d     # Prometheus :9090, Grafana :3030 (admin / codemind)
 ```
 
+### Langfuse tracing
+
+Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (and `LANGFUSE_BASE_URL`: `https://cloud.langfuse.com` for EU, `https://us.cloud.langfuse.com` for US) in `.env` and restart. Every model call then appears in Langfuse as a generation with its model, input and output tokens, timings, prompt and reply. Calls made for one request are grouped under one trace: a question (`ask`, with its retrieval step), a file explanation (`explain-file`), a tRPC action such as indexing or commit analysis, or a GitHub webhook. Without keys nothing is sent and the app runs as before.
+
+The prompts contain repository code. Secrets such as API keys are redacted and long text is cut, but set `LANGFUSE_CAPTURE_CONTENT=false` to send only tokens and timings. The code is in `src/services/observability/langfuse.ts`.
+
 Grafana opens on the provisioned **CodeMind — Local AI Observability** dashboard. Both data sources (Prometheus and PostgreSQL) are configured automatically.
 
 ## Remote deployment

@@ -3,6 +3,8 @@ import type { ChatPromptValueInterface } from "@langchain/core/prompt_values";
 import { RunnableLambda, type RunnableLike } from "@langchain/core/runnables";
 import { ChatOllama } from "@langchain/ollama";
 import { GenerationMetricsHandler } from "../rag/generation-metrics";
+import { PromptCaptureHandler, toChatMessages } from "../rag/prompt-capture";
+import type { ChatMessage } from "../telemetry";
 import { llmConfig, ollamaHeaders } from "./config";
 import { createProvider } from "./index";
 import type { CompletionMetrics, LLMProvider, ModelSelection } from "./provider";
@@ -33,6 +35,8 @@ export interface AnswerModel {
   callbacks?: Callbacks;
   /** Token counts and timings of the last generation, if the provider reported any. */
   getMetrics(): CompletionMetrics;
+  /** The messages sent to the model in the last generation, for tracing. */
+  getPrompt(): ChatMessage[] | undefined;
 }
 
 /**
@@ -42,8 +46,10 @@ export interface AnswerModel {
  */
 export function answerModelFromProvider(provider: LLMProvider): AnswerModel {
   let metrics: CompletionMetrics = {};
+  let captured: ChatMessage[] | undefined;
   const llm = RunnableLambda.from(async function* (prompt: ChatPromptValueInterface, config?: { signal?: AbortSignal }) {
     const messages = prompt.toChatMessages();
+    captured = toChatMessages(messages);
     const textOf = (type: string) =>
       messages
         .filter((m) => m.getType() === type)
@@ -60,7 +66,7 @@ export function answerModelFromProvider(provider: LLMProvider): AnswerModel {
       else yield chunk.text;
     }
   });
-  return { llm, getMetrics: () => metrics };
+  return { llm, getMetrics: () => metrics, getPrompt: () => captured };
 }
 
 /**
@@ -71,7 +77,8 @@ export function answerModelFromProvider(provider: LLMProvider): AnswerModel {
 export function createAnswerModel(selection: ModelSelection): AnswerModel {
   if (selection.provider === "ollama") {
     const handler = new GenerationMetricsHandler();
-    return { llm: getChatModel(selection.model), callbacks: [handler], getMetrics: () => handler.metrics ?? {} };
+    const capture = new PromptCaptureHandler();
+    return { llm: getChatModel(selection.model), callbacks: [handler, capture], getMetrics: () => handler.metrics ?? {}, getPrompt: () => capture.prompt };
   }
   return answerModelFromProvider(createProvider(selection));
 }
